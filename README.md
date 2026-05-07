@@ -99,7 +99,7 @@ A private key file may be used in place of a password for the SSH connection. Th
 ```
 services:
   wireguardshowdumpapi:
-    image: wireguardshowdumpapi
+    image: ghcr.io/blake502/wg-show-dump-api:latest
     container_name: wireguardshowdumpapi
     ports:
       - 6543:6543
