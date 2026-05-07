@@ -21,13 +21,22 @@ namespace wg_show_dump_API
         {
             //Validate environment variables
             if (IP == null)
+            {
+                Console.WriteLine("No SSH IP provided. Defaulting to 127.0.0.1\nPlease use the SSH_IP environment variable to provide one.");
                 IP = "127.0.0.1";
+            }
 
             if (username == null)
+            {
+                Console.WriteLine("No SSH username provided. Defaulting to root\nPlease use the SSH_USERNAME environment variable to provide one.");
                 username = "root";
+            }
 
             if (wgCommand == null)
+            {
+                Console.WriteLine("No SSH command provided. Defaulting to \"wg show all dump\"\nYou may use the SSH_WG_COMMAND environment variable to configure one if you run WireGuard in a Docker container.");
                 username = "wg show all dump";
+            }
 
             string? minRefreshString = Environment.GetEnvironmentVariable("SSH_MIN_REFRESH");
 
@@ -38,22 +47,28 @@ namespace wg_show_dump_API
                 }
                 catch
                 {
+                    Console.WriteLine("No minimum refresh time provided. Defaulting to 10 seconds.\nYou may use use the SSH_MIN_REFRESH environment variable to configure this.");
                     MinRefreshTime = 10;
                 }
 
-            Console.WriteLine("IP: {0}\nSSH Username: {1}\nMinimum Refresh Time: {2}", IP, username, MinRefreshTime.ToString());
+            Console.WriteLine("wg-show-dump-API will use these settings:\nIP: {0}\nSSH Username: {1}\nMinimum Refresh Time: {2} seconds", IP, username, MinRefreshTime.ToString());
 
             //Web App init
-            var builder = WebApplication.CreateBuilder(args);
+            Console.WriteLine("Creating WebApplication...");
+            var builder = WebApplication.CreateBuilder();
             var app = builder.Build();
 
             //Answer on /peer
+            Console.WriteLine("Mapping /peer...");
             app.MapGet("/peer", (string id) =>
             {
+                Console.WriteLine("Connection received!");
+
                 //Hacky, but feeding an ID treats pluses as spaces. So we'll intentionally treat spaces as pluses.
                 id = id.Replace(" ", "+");
 
                 //Grab peer info
+                Console.WriteLine("Gathering peer information...");
                 PeerInfo peerInfo = getPeerInfo(id);
 
                 //Send the info
@@ -72,7 +87,12 @@ namespace wg_show_dump_API
             });
 
             //Begin app on port 6543
-            app.Run("http://0.0.0.0:6543");
+            Console.WriteLine("Starting server...");
+            app.RunAsync("http://0.0.0.0:6543");
+
+            Console.WriteLine("Listening on port 6543!");
+
+            while (true) { /*infinite loop, sue me*/ }
         }
 
 
@@ -114,8 +134,6 @@ namespace wg_show_dump_API
                 //TODO: Parse "wg show all dump" instead
                 //Parse results
 
-                Console.Write(cmd.Result);
-                Console.WriteLine("Parsing...");
                 foreach (string line in cmd.Result.Split("\n"))
                 {
                     string[] split = line.Split("\t");
@@ -171,8 +189,14 @@ namespace wg_show_dump_API
                     //Record last refresh time
                     lastRefresh = DateTime.Now;
 
+                    Console.WriteLine("Gathering new information...");
+
                     //Update peer info
                     getPeerInfos();
+                }
+                else
+                {
+                    Console.WriteLine("Using cached information...");
                 }
 
                 //Locate and return the peer with the matching ID
@@ -180,9 +204,10 @@ namespace wg_show_dump_API
                     if (peerInfo.publicKey == id)
                         return peerInfo;
 
-                //Throw an exception if no peer is found
-                //TODO: Better handling, but it's fine for now
-                throw new Exception();
+                Console.WriteLine("Could not find matching peer!");
+
+                //No peer is found
+                return new PeerInfo();
             }
         }
     }
