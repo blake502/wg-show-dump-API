@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "dgSpecHash": "k9csyVlw1jM=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\smudge\\OneDrive\\Programming\\Projects\\C#\\wg-show-dump-API\\wg-show-dump-API.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\smudge\\.nuget\\packages\\bouncycastle.cryptography\\2.6.2\\bouncycastle.cryptography.2.6.2.nupkg.sha512",
+    "C:\\Users\\smudge\\.nuget\\packages\\microsoft.aspnetcore.openapi\\10.0.7\\microsoft.aspnetcore.openapi.10.0.7.nupkg.sha512",
+    "C:\\Users\\smudge\\.nuget\\packages\\microsoft.openapi\\2.0.0\\microsoft.openapi.2.0.0.nupkg.sha512",
+    "C:\\Users\\smudge\\.nuget\\packages\\microsoft.visualstudio.azure.containers.tools.targets\\1.23.0\\microsoft.visualstudio.azure.containers.tools.targets.1.23.0.nupkg.sha512",
+    "C:\\Users\\smudge\\.nuget\\packages\\ssh.net\\2025.1.0\\ssh.net.2025.1.0.nupkg.sha512"
+  ],
+  "logs": []
+}
