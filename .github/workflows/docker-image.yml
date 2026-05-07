@@ -25,4 +25,4 @@ jobs:
             --tag ghcr.io/wg-show-dump-api:latest
 
       - name: Push Docker image
-        run: docker push ghcr.io/${{ github.repository }}:latest
+        run: docker push ghcr.io/wg-show-dump-api:latest
