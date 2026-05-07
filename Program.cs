@@ -19,6 +19,7 @@ namespace wg_show_dump_API
         static int? MinRefreshTime;
 
         static SshClient? client = null;
+        static object sshClientLockObject = new Object();
 
         public static void Main(string[] args)
         {
@@ -34,6 +35,17 @@ namespace wg_show_dump_API
                 Console.WriteLine("[WARN] No SSH username provided. Defaulting to root\nPlease use the SSH_USERNAME environment variable to provide one.");
                 username = "root";
             }
+
+            if (password == null)
+                //If no password provided, look for key file
+                if (!File.Exists("key"))
+                {
+                    //If neither, fatal error
+                    Console.WriteLine("[FATAL] Neither a key file nor a password were provided!");
+                    Environment.Exit(1);
+                }
+                else
+                    Console.WriteLine("[INFO] Connecting SSH client using key file...");
 
             if (wgCommand == null)
             {
@@ -126,14 +138,14 @@ namespace wg_show_dump_API
                 return peerInfoObjects;
             });
 
+            //Build the SSH client
+            validateSshClient();
+
             //Begin app on port 6543
             Console.WriteLine("[INFO] Starting server...");
             app.RunAsync("http://0.0.0.0:6543");
 
             Console.WriteLine("[INFO] Listening on port 6543!");
-
-            //Build the SSH client
-            validateSshClient();
 
             while (true)
             {
@@ -143,65 +155,68 @@ namespace wg_show_dump_API
                 //We can keep the SSH session alive
                 validateSshClient();
 
-                //No need to check excessively, 1 sec is good
+                //No need to check excessively, 10 sec is good
                 Thread.Sleep(10000);
             }
         }
 
         static void validateSshClient()
         {
-            try
+            lock (sshClientLockObject)
             {
-                if (client == null)
+                try
                 {
-                    Console.WriteLine("[INFO] Creating SSH client...");
-                    if (password == null)
+                    if (client == null)
                     {
-                        //If no password provided, look for key file
-                        if (File.Exists("key"))
+                        Console.WriteLine("[INFO] Creating SSH client...");
+                        if (password == null)
                         {
-                            Console.WriteLine("[INFO] Connecting SSH client using key file...");
-                            var keyFile = new PrivateKeyFile("key");
-                            client = new SshClient(IP, username, keyFile);
+                            //If no password provided, look for key file
+                            if (File.Exists("key"))
+                            {
+                                Console.WriteLine("[INFO] Connecting SSH client using key file...");
+                                var keyFile = new PrivateKeyFile("key");
+                                client = new SshClient(IP, username, keyFile);
+                            }
+                            else
+                            {
+                                //If neither, fatal error
+                                Console.WriteLine("[FATAL] Neither a key file nor a password were provided!");
+                                Environment.Exit(1);
+                            }
                         }
                         else
                         {
-                            //If neither, fatal error
-                            Console.WriteLine("[FATAL] Neither a key file nor a password were provided!");
-                            Environment.Exit(1);
+                            //Otherwise, use provided password
+                            Console.WriteLine("[INFO] Connecting SSH client using password...");
+                            client = new SshClient(IP, username, password);
                         }
+
+                        //Connect
+                        client.Connect();
+
+                        if (client.IsConnected)
+                            Console.WriteLine("[INFO] SSH client connected successfully!");
+                        else
+                            Console.WriteLine("[ERROR] SSH client failed to connect!");
                     }
                     else
-                    {
-                        //Otherwise, use provided password
-                        Console.WriteLine("[INFO] Connecting SSH client using password...");
-                        client = new SshClient(IP, username, password);
-                    }
-
-                    //Connect
-                    client.Connect();
-
-                    if (client.IsConnected)
-                        Console.WriteLine("[INFO] SSH client connected successfully!");
-                    else
-                        Console.WriteLine("[ERROR] SSH client failed to connect!");
+                        if (!client.IsConnected)
+                        {
+                            client.Dispose();
+                            Console.WriteLine("[ERROR] SSH client not connected!");
+                        }
                 }
-                else
-                    if (!client.IsConnected)
-                    {
+                catch
+                {
+                    Console.WriteLine("[ERROR] Something went wrong with the SSH client!");
+
+                    //Dispose of client
+                    if (client != null)
                         client.Dispose();
-                        Console.WriteLine("[ERROR] SSH client not connected!");
-                    }
-            }
-            catch
-            {
-                Console.WriteLine("[ERROR] Something went wrong with the SSH client!");
 
-                //Dispose of client
-                if (client != null)
-                    client.Dispose();
-
-                validateSshClient();
+                    validateSshClient();
+                }
             }
         }
 
