@@ -59,11 +59,15 @@ namespace wg_show_dump_API
                 //Send the info
                 return new
                 {
-                    publickey = peerInfo.publicKey,
+                    interfaceName = peerInfo.interfaceName,
+                    publicKey = peerInfo.publicKey,
+                    presharedKey = peerInfo.presharedKey,
                     endpoint = peerInfo.endpoint,
-                    latest_handshake = peerInfo.latestHandshake,
-                    bytes_received = peerInfo.transferRx,
-                    bytes_sent = peerInfo.transferTx
+                    allowedIPs = peerInfo.allowedIPs,
+                    latestHandshake = peerInfo.latestHandshake,
+                    transferRx = peerInfo.transferRx,
+                    transferTx = peerInfo.transferTx,
+                    persistentKeepAlive = peerInfo.persistentKeepAlive
                 };
             });
 
@@ -109,17 +113,25 @@ namespace wg_show_dump_API
 
                 //TODO: Parse "wg show all dump" instead
                 //Parse results
+
+                Console.Write(cmd.Result);
+                Console.WriteLine("Parsing...");
                 foreach (string line in cmd.Result.Split("\n"))
                 {
-                    string interfaceName = line.Split(' ')[0];
-                    string publicKey = line.Split(" ")[1];
-                    string presharedKey = line.Split(" ")[2];
-                    string endpoint = line.Split(" ")[3];
-                    string allowedIPs = line.Split(" ")[4];
-                    string latestHandshake = line.Split(" ")[5];
-                    string transferRx = line.Split(" ")[6];
-                    string transferTx = line.Split(" ")[7];
-                    string persistentKeepAlive = line.Split(" ")[8];
+                    string[] split = line.Split("\t");
+
+                    if (split.Length < 9)
+                        continue;
+
+                    string interfaceName = split[0];
+                    string publicKey = split[1];
+                    string presharedKey = split[2];
+                    string endpoint = split[3];
+                    string allowedIPs = split[4];
+                    string latestHandshake = split[5];
+                    string transferRx = split[6];
+                    string transferTx = split[7];
+                    string persistentKeepAlive = split[8];
 
                     PeerInfo peerInfo = new PeerInfo();
 
@@ -128,9 +140,9 @@ namespace wg_show_dump_API
                     peerInfo.presharedKey = presharedKey;
                     peerInfo.endpoint = endpoint;
                     peerInfo.allowedIPs = allowedIPs;
-                    peerInfo.latestHandshake = DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt32(latestHandshake)).DateTime;
-                    peerInfo.transferRx = Convert.ToInt32(transferRx);
-                    peerInfo.transferTx = Convert.ToInt32(transferTx);
+                    peerInfo.latestHandshake = DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(latestHandshake)).DateTime;
+                    peerInfo.transferRx = Convert.ToInt64(transferRx);
+                    peerInfo.transferTx = Convert.ToInt64(transferTx);
                     peerInfo.persistentKeepAlive = persistentKeepAlive != "off";
 
                     peerInfos.Add(peerInfo);
@@ -183,8 +195,8 @@ namespace wg_show_dump_API
         public string endpoint;
         public string allowedIPs;
         public DateTime latestHandshake;
-        public int transferRx;
-        public int transferTx;
+        public long transferRx;
+        public long transferTx;
         public bool persistentKeepAlive;
 
         public PeerInfo()
