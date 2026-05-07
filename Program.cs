@@ -11,12 +11,12 @@ namespace wg_show_dump_API
         static DateTime lastRefresh = DateTime.MinValue;
         static object refreshLockObject = new Object();
 
-        static string? IP = Environment.GetEnvironmentVariable("SSH_IP");
+        static string? ip = Environment.GetEnvironmentVariable("SSH_IP");
         static string? username = Environment.GetEnvironmentVariable("SSH_USERNAME");
         static string? password = Environment.GetEnvironmentVariable("SSH_PASSWORD");
         static string? wgCommand = Environment.GetEnvironmentVariable("SSH_WG_COMMAND");
 
-        static int? MinRefreshTime;
+        static int? minRefreshTime;
 
         static SshClient? client = null;
         static object sshClientLockObject = new Object();
@@ -24,10 +24,10 @@ namespace wg_show_dump_API
         public static void Main(string[] args)
         {
             //Validate environment variables
-            if (IP == null)
+            if (ip == null)
             {
                 Console.WriteLine("[WARN] No SSH IP provided. Defaulting to 127.0.0.1\nPlease use the SSH_IP environment variable to provide one.");
-                IP = "127.0.0.1";
+                ip = "127.0.0.1";
             }
 
             if (username == null)
@@ -58,20 +58,20 @@ namespace wg_show_dump_API
             if (minRefreshString != null)
                 try
                 {
-                    MinRefreshTime = Convert.ToInt32(minRefreshString);
+                    minRefreshTime = Convert.ToInt32(minRefreshString);
                 }
                 catch
                 {
                     Console.WriteLine("[WARN] No minimum refresh time provided. Defaulting to 10 seconds.\nYou may use use the SSH_MIN_REFRESH environment variable to configure this.");
-                    MinRefreshTime = 10;
+                    minRefreshTime = 10;
                 }
 
             Console.WriteLine("[INFO] wg-show-dump-API will use these setting:");
-            Console.WriteLine("[INFO] IP:                       " + IP);
+            Console.WriteLine("[INFO] IP:                       " + ip);
             Console.WriteLine("[INFO] Username:                 " + username);
             Console.WriteLine("[INFO] Authentication Method:    " + ((password == null) ? "Keyfile" : "Password"));
             Console.WriteLine("[INFO] Command:                  " + wgCommand);
-            Console.WriteLine("[INFO] Minimum Refresh:          " + minRefreshString.ToString() + " seconds");
+            Console.WriteLine("[INFO] Minimum Refresh:          " + minRefreshTime.ToString() + " seconds");
 
             //Web App init
             Console.WriteLine("[INFO] Creating WebApplication...");
@@ -176,7 +176,7 @@ namespace wg_show_dump_API
                             {
                                 Console.WriteLine("[INFO] Connecting SSH client using key file...");
                                 var keyFile = new PrivateKeyFile("key");
-                                client = new SshClient(IP, username, keyFile);
+                                client = new SshClient(ip, username, keyFile);
                             }
                             else
                             {
@@ -189,7 +189,7 @@ namespace wg_show_dump_API
                         {
                             //Otherwise, use provided password
                             Console.WriteLine("[INFO] Connecting SSH client using password...");
-                            client = new SshClient(IP, username, password);
+                            client = new SshClient(ip, username, password);
                         }
 
                         //Connect
@@ -229,7 +229,7 @@ namespace wg_show_dump_API
             {
                 //Make sure the minimum refresh time has passed since the last refresh
                 //Otherwise, return and force cached entries to be used
-                if (DateTime.Now.Subtract(lastRefresh).TotalSeconds <= MinRefreshTime)
+                if (DateTime.Now.Subtract(lastRefresh).TotalSeconds <= minRefreshTime)
                 {
                     Console.WriteLine("[INFO] Using cached information...");
                     return;
