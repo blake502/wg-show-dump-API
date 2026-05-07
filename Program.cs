@@ -184,8 +184,20 @@ namespace wg_show_dump_API
                     peerInfo.endpoint = endpoint;
                     peerInfo.allowedIPs = allowedIPs;
 
-                    //Convert Unix time text to local DateTime
-                    peerInfo.latestHandshake = DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(latestHandshake)).DateTime.ToLocalTime();
+                    //If "0", it has not connected since wg started
+                    //Keep the default value "Never" if never connected
+                    if (latestHandshake != "0")
+                    {
+                        //Convert to long
+                        long latestHandshakeLong = Convert.ToInt64(latestHandshake);
+                        //Convert to DateTime
+                        DateTime latestHandshakeDateTime = DateTimeOffset.FromUnixTimeSeconds(latestHandshakeLong).DateTime;
+                        //Convert to local time
+                        latestHandshakeDateTime = latestHandshakeDateTime.ToLocalTime();
+                        //Convert to string and apply property
+                        peerInfo.latestHandshake = latestHandshakeDateTime.ToString("o");
+                    }
+
                     //Convert transferRx text to long (yes, it must be a long)
                     peerInfo.transferRx = Convert.ToInt64(transferRx);
                     //Convert transferTx text to long (yes, it must be a long)
@@ -247,7 +259,9 @@ namespace wg_show_dump_API
         public string presharedKey;
         public string endpoint;
         public string allowedIPs;
-        public DateTime latestHandshake;
+        //Using a string instead of DateTime allows us to use "Never"
+        //instead of 1970 for clients that have not connected since wg started
+        public string latestHandshake;
         public long transferRx;
         public long transferTx;
         public bool persistentKeepAlive;
@@ -259,7 +273,7 @@ namespace wg_show_dump_API
             presharedKey = "n/a";
             endpoint = "n/a";
             allowedIPs = "n/a";
-            latestHandshake = DateTime.MinValue;
+            latestHandshake = "Never";
             transferRx = 0;
             transferTx = 0;
             persistentKeepAlive = false;
