@@ -35,7 +35,7 @@ namespace wg_show_dump_API
             if (wgCommand == null)
             {
                 Console.WriteLine("No SSH command provided. Defaulting to \"wg show all dump\"\nYou may use the SSH_WG_COMMAND environment variable to configure one if you run WireGuard in a Docker container.");
-                username = "wg show all dump";
+                wgCommand = "wg show all dump";
             }
 
             string? minRefreshString = Environment.GetEnvironmentVariable("SSH_MIN_REFRESH");
@@ -133,6 +133,8 @@ namespace wg_show_dump_API
 
                 //TODO: Parse "wg show all dump" instead
                 //Parse results
+                Console.WriteLine("Successfully found {0} lines!", cmd.Result.Split("\n").Length.ToString());
+                Console.Write(cmd.Result);
 
                 foreach (string line in cmd.Result.Split("\n"))
                 {
@@ -158,13 +160,15 @@ namespace wg_show_dump_API
                     peerInfo.presharedKey = presharedKey;
                     peerInfo.endpoint = endpoint;
                     peerInfo.allowedIPs = allowedIPs;
-                    peerInfo.latestHandshake = DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(latestHandshake)).DateTime;
+                    peerInfo.latestHandshake = DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(latestHandshake)).DateTime.ToLocalTime();
                     peerInfo.transferRx = Convert.ToInt64(transferRx);
                     peerInfo.transferTx = Convert.ToInt64(transferTx);
                     peerInfo.persistentKeepAlive = persistentKeepAlive != "off";
 
                     peerInfos.Add(peerInfo);
                 }
+
+                Console.WriteLine("Successfully parsed {0} peers!", peerInfos.Count);
 
                 //Disconnect cleanly
                 client.Disconnect();
