@@ -17,6 +17,8 @@ namespace wg_show_dump_API
 
         static int? MinRefreshTime;
 
+        static SshClient? client = null;
+
         public static void Main(string[] args)
         {
             //Validate environment variables
@@ -92,57 +94,78 @@ namespace wg_show_dump_API
 
             Console.WriteLine("Listening on port 6543!");
 
-            while (true) { /*infinite loop, sue me*/ }
+            while (true)
+            {
+                /*infinite loop, sue me*/
+                try
+                {
+                    if (client == null)
+                    {
+                        if (password == null)
+                        {
+                            //If no password provided, use key file
+                            //This will throw an exception if no key file is provided
+                            //We're already in a "try" statement, so I'm not too
+                            //worried about validating whether the file exists
+                            var keyFile = new PrivateKeyFile("key");
+                            client = new SshClient(IP, username, keyFile);
+                        }
+                        else
+                            //Otherwise, use provided password
+                            client = new SshClient(IP, username, password);
+
+                        //Connect
+                        client.Connect();
+                    }
+                    else
+                        if (!client.IsConnected)
+                            client.Dispose();
+                }
+                catch
+                {
+                    //Dispose of client (manual "using")
+                    if (client != null)
+                        client.Dispose();
+                }
+
+                //No need to check excessively, 1 sec is good
+                Thread.Sleep(1000);
+            }
         }
 
-
-        //Posssible TODO
-        //Keep SSH client connected instead of reestablishing connection every refresh
         static void getPeerInfos()
         {
-            //Clear caches peer info
+            //Clear cached peer info
             peerInfos.Clear();
 
-            //Not using "using" to dispose of SshClient because the constructor
-            //is different depending on whether we're using password or key file
-            SshClient client = null;
+            if (client == null)
+            {
+                Console.WriteLine("SSH client not initialized!");
+                return;
+            }
 
-            //Try as a manual "using"
+            if (!client.IsConnected)
+            {
+                Console.WriteLine("SSH client not connected!");
+                return;
+            }
+
             try
             {
-                if (password == null)
-                {
-                    //If no password provided, use key file
-                    //This will throw an exception if no key file is provided
-                    //We're already in a "try" statement, so I'm not too
-                    //worried about validating whether the file exists
-                    var keyFile = new PrivateKeyFile("key");
-                    client = new SshClient(IP, username, keyFile);
-                }
-                else
-                {
-                    //Otherwise, use provided password
-                    client = new SshClient(IP, username, password);
-                }
-
-                //Connect
-                client.Connect();
-
-                //Send wg command (IE: "wg" or "docker exec wireguard wg")
+                //Send wg dump command (IE: "wg show all dump" or "docker exec wireguard wg show all dump")
                 using SshCommand cmd = client.RunCommand(wgCommand);
 
-                //TODO: Parse "wg show all dump" instead
-                //Parse results
-                Console.WriteLine("Successfully found {0} lines!", cmd.Result.Split("\n").Length.ToString());
-                Console.Write(cmd.Result);
-
+                //"wg show all dump" returns a tab-delimited sheet
                 foreach (string line in cmd.Result.Split("\n"))
                 {
+                    //Parse results
                     string[] split = line.Split("\t");
 
+                    //Valid peer entries have 9 columns
                     if (split.Length < 9)
                         continue;
 
+                    //The sheet does not contain a header
                     string interfaceName = split[0];
                     string publicKey = split[1];
                     string presharedKey = split[2];
@@ -160,30 +183,33 @@ namespace wg_show_dump_API
                     peerInfo.presharedKey = presharedKey;
                     peerInfo.endpoint = endpoint;
                     peerInfo.allowedIPs = allowedIPs;
+
+                    //Convert Unix time text to local DateTime
                     peerInfo.latestHandshake = DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(latestHandshake)).DateTime.ToLocalTime();
+                    //Convert transferRx text to long (yes, it must be a long)
                     peerInfo.transferRx = Convert.ToInt64(transferRx);
+                    //Convert transferTx text to long (yes, it must be a long)
                     peerInfo.transferTx = Convert.ToInt64(transferTx);
+                    //Convert persistentKeepAlive to bool (always either "on" or "off" even for disconnected clients)
                     peerInfo.persistentKeepAlive = persistentKeepAlive != "off";
 
                     peerInfos.Add(peerInfo);
                 }
 
                 Console.WriteLine("Successfully parsed {0} peers!", peerInfos.Count);
-
-                //Disconnect cleanly
-                client.Disconnect();
             }
-            finally
+            catch (Exception ex)
             {
-                //Dispose of client (manual "using")
-                if (client != null)
-                    client.Dispose();
+                Console.WriteLine("Something went wrong while trying to refresh info from WireGuard!");
+                Console.WriteLine("Please report this bug!");
+                Console.WriteLine(ex.ToString());
+                Console.WriteLine(ex.Message);
             }
         }
 
         static PeerInfo getPeerInfo(string id)
         {
-            //Use lock object to keep multiple requests from hammering SSH commands
+            //Use lock object to keep multiple requests from blasting SSH commands
             lock (refreshLockObject)
             {
                 //Make sure the minimum refresh time has passed since the last refresh
@@ -193,15 +219,13 @@ namespace wg_show_dump_API
                     //Record last refresh time
                     lastRefresh = DateTime.Now;
 
-                    Console.WriteLine("Gathering new information...");
+                    Console.WriteLine("Refreshing information...");
 
                     //Update peer info
                     getPeerInfos();
                 }
                 else
-                {
                     Console.WriteLine("Using cached information...");
-                }
 
                 //Locate and return the peer with the matching ID
                 foreach (PeerInfo peerInfo in peerInfos)
