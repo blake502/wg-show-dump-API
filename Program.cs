@@ -1,3 +1,4 @@
+using Microsoft.Extensions.ObjectPool;
 using Renci.SshNet;
 
 namespace wg_show_dump_API
@@ -71,7 +72,7 @@ namespace wg_show_dump_API
 
                 //Grab peer info
                 Console.WriteLine("Gathering peer information...");
-                PeerInfo peerInfo = getPeerInfo(id);
+                PeerInfo peerInfo = getPeerInfoById(id);
 
                 //Send the info
                 return new
@@ -86,6 +87,35 @@ namespace wg_show_dump_API
                     transferTx = peerInfo.transferTx,
                     persistentKeepAlive = peerInfo.persistentKeepAlive
                 };
+            });
+
+            Console.WriteLine("Mapping /peers");
+            app.MapGet("/peers", () =>
+            {
+                //Grab peer info
+                Console.WriteLine("Gathering peer information...");
+                updatePeerInfos();
+
+                object[] peerInfoObjects = new object[peerInfos.Count];
+
+                for(int i = 0; i < peerInfos.Count; i++)
+                {
+                    PeerInfo peerInfo = peerInfos[i];
+                    peerInfoObjects[i] = new
+                    {
+                        interfaceName = peerInfo.interfaceName,
+                        publicKey = peerInfo.publicKey,
+                        presharedKey = peerInfo.presharedKey,
+                        endpoint = peerInfo.endpoint,
+                        allowedIPs = peerInfo.allowedIPs,
+                        latestHandshake = peerInfo.latestHandshake,
+                        transferRx = peerInfo.transferRx,
+                        transferTx = peerInfo.transferTx,
+                        persistentKeepAlive = peerInfo.persistentKeepAlive
+                    };
+                }
+
+                return peerInfoObjects;
             });
 
             //Begin app on port 6543
@@ -133,123 +163,132 @@ namespace wg_show_dump_API
             }
         }
 
-        static void getPeerInfos()
-        {
-            //Clear cached peer info
-            peerInfos.Clear();
-
-            if (client == null)
-            {
-                Console.WriteLine("SSH client not initialized!");
-                return;
-            }
-
-            if (!client.IsConnected)
-            {
-                Console.WriteLine("SSH client not connected!");
-                return;
-            }
-
-            try
-            {
-                //Send wg dump command (IE: "wg show all dump" or "docker exec wireguard wg show all dump")
-                using SshCommand cmd = client.RunCommand(wgCommand);
-
-                //"wg show all dump" returns a tab-delimited sheet
-                foreach (string line in cmd.Result.Split("\n"))
-                {
-                    //Parse results
-                    string[] split = line.Split("\t");
-
-                    //Valid peer entries have 9 columns
-                    if (split.Length < 9)
-                        continue;
-
-                    //The sheet does not contain a header
-                    string interfaceName = split[0];
-                    string publicKey = split[1];
-                    string presharedKey = split[2];
-                    string endpoint = split[3];
-                    string allowedIPs = split[4];
-                    string latestHandshake = split[5];
-                    string transferRx = split[6];
-                    string transferTx = split[7];
-                    string persistentKeepAlive = split[8];
-
-                    PeerInfo peerInfo = new PeerInfo();
-
-                    peerInfo.interfaceName = interfaceName;
-                    peerInfo.publicKey = publicKey;
-                    peerInfo.presharedKey = presharedKey;
-                    peerInfo.endpoint = endpoint;
-                    peerInfo.allowedIPs = allowedIPs;
-
-                    //If "0", it has not connected since wg started
-                    //Keep the default value "Never" if never connected
-                    if (latestHandshake != "0")
-                    {
-                        //Convert to long
-                        long latestHandshakeLong = Convert.ToInt64(latestHandshake);
-                        //Convert to DateTime
-                        DateTime latestHandshakeDateTime = DateTimeOffset.FromUnixTimeSeconds(latestHandshakeLong).DateTime;
-                        //Convert to local time
-                        latestHandshakeDateTime = latestHandshakeDateTime.ToLocalTime();
-                        //Convert to string and apply property
-                        peerInfo.latestHandshake = latestHandshakeDateTime.ToString("o");
-                    }
-
-                    //Convert transferRx text to long (yes, it must be a long)
-                    peerInfo.transferRx = Convert.ToInt64(transferRx);
-                    //Convert transferTx text to long (yes, it must be a long)
-                    peerInfo.transferTx = Convert.ToInt64(transferTx);
-                    //Convert persistentKeepAlive to bool (always either "on" or "off" even for disconnected clients)
-                    peerInfo.persistentKeepAlive = persistentKeepAlive != "off";
-
-                    peerInfos.Add(peerInfo);
-                }
-
-                Console.WriteLine("Successfully parsed {0} peers!", peerInfos.Count);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Something went wrong while trying to refresh info from WireGuard!");
-                Console.WriteLine("Please report this bug!");
-                Console.WriteLine(ex.ToString());
-                Console.WriteLine(ex.Message);
-            }
-        }
-
-        static PeerInfo getPeerInfo(string id)
+        //Does nothing if refresh interval has not passed
+        //Otherwise, uses SSH to query WireGuard and parses results
+        static void updatePeerInfos()
         {
             //Use lock object to keep multiple requests from blasting SSH commands
             lock (refreshLockObject)
             {
                 //Make sure the minimum refresh time has passed since the last refresh
-                //Otherwise, cached entries will be returned
-                if (DateTime.Now.Subtract(lastRefresh).TotalSeconds > MinRefreshTime)
+                //Otherwise, return and force cached entries to be used
+                if (DateTime.Now.Subtract(lastRefresh).TotalSeconds <= MinRefreshTime)
                 {
-                    //Record last refresh time
-                    lastRefresh = DateTime.Now;
-
-                    Console.WriteLine("Refreshing information...");
-
-                    //Update peer info
-                    getPeerInfos();
-                }
-                else
                     Console.WriteLine("Using cached information...");
+                    return;
+                }
 
-                //Locate and return the peer with the matching ID
-                foreach (PeerInfo peerInfo in peerInfos)
-                    if (peerInfo.publicKey == id)
-                        return peerInfo;
+                //Record last refresh time
+                //This happens BEFORE parsing
+                //That way, users can resonably expect a 10 second min refresh to be
+                //10 seconds. Not 10 seconds PLUS the time it takes to refresh and parse.
+                lastRefresh = DateTime.Now;
 
-                Console.WriteLine("Could not find matching peer!");
+                Console.WriteLine("Refreshing information...");
 
-                //No peer is found
-                return new PeerInfo();
+                //Clear cached peer info
+                peerInfos.Clear();
+
+                //Maybe I should "Clear" after these checks,
+                //but I don't want cached info to get too old in the event of an issue
+                //Doing it this way allows that issue to be observed down stream.
+                if (client == null)
+                {
+                    Console.WriteLine("SSH client not initialized!");
+                    return;
+                }
+
+                if (!client.IsConnected)
+                {
+                    Console.WriteLine("SSH client not connected!");
+                    return;
+                }
+
+                try
+                {
+                    //Send wg dump command (IE: "wg show all dump" or "docker exec wireguard wg show all dump")
+                    using SshCommand cmd = client.RunCommand(wgCommand);
+
+                    //"wg show all dump" returns a tab-delimited sheet
+                    foreach (string line in cmd.Result.Split("\n"))
+                    {
+                        //Parse results
+                        string[] split = line.Split("\t");
+
+                        //Valid peer entries have 9 columns
+                        if (split.Length < 9)
+                            continue;
+
+                        //The sheet does not contain a header
+                        string interfaceName = split[0];
+                        string publicKey = split[1];
+                        string presharedKey = split[2];
+                        string endpoint = split[3];
+                        string allowedIPs = split[4];
+                        string latestHandshake = split[5];
+                        string transferRx = split[6];
+                        string transferTx = split[7];
+                        string persistentKeepAlive = split[8];
+
+                        PeerInfo peerInfo = new PeerInfo();
+
+                        peerInfo.interfaceName = interfaceName;
+                        peerInfo.publicKey = publicKey;
+                        peerInfo.presharedKey = presharedKey;
+                        peerInfo.endpoint = endpoint;
+                        peerInfo.allowedIPs = allowedIPs;
+
+                        //If "0", it has not connected since wg started
+                        //Keep the default value "Never" if never connected
+                        if (latestHandshake != "0")
+                        {
+                            //Convert to long
+                            long latestHandshakeLong = Convert.ToInt64(latestHandshake);
+                            //Convert to DateTime
+                            DateTime latestHandshakeDateTime = DateTimeOffset.FromUnixTimeSeconds(latestHandshakeLong).DateTime;
+                            //Convert to local time
+                            latestHandshakeDateTime = latestHandshakeDateTime.ToLocalTime();
+                            //Convert to string and apply property
+                            peerInfo.latestHandshake = latestHandshakeDateTime.ToString("o");
+                        }
+
+                        //Convert transferRx text to long (yes, it must be a long)
+                        peerInfo.transferRx = Convert.ToInt64(transferRx);
+                        //Convert transferTx text to long (yes, it must be a long)
+                        peerInfo.transferTx = Convert.ToInt64(transferTx);
+                        //Convert persistentKeepAlive to bool (always either "on" or "off" even for disconnected clients)
+                        peerInfo.persistentKeepAlive = persistentKeepAlive != "off";
+
+                        peerInfos.Add(peerInfo);
+                    }
+
+                    Console.WriteLine("Successfully parsed {0} peers!", peerInfos.Count);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Something went wrong while trying to refresh info from WireGuard!");
+                    Console.WriteLine("Please report this bug!");
+                    Console.WriteLine(ex.ToString());
+                    Console.WriteLine(ex.Message);
+                }
             }
         }
+
+        static PeerInfo getPeerInfoById(string id)
+        {
+            updatePeerInfos();
+
+            //Locate and return the peer with the matching ID
+            foreach (PeerInfo peerInfo in peerInfos)
+                if (peerInfo.publicKey == id)
+                    return peerInfo;
+
+            Console.WriteLine("Could not find matching peer!");
+
+            //No peer is found
+            return new PeerInfo();
+        }
+
     }
 
     class PeerInfo
