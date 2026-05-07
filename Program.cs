@@ -25,19 +25,19 @@ namespace wg_show_dump_API
             //Validate environment variables
             if (IP == null)
             {
-                Console.WriteLine("No SSH IP provided. Defaulting to 127.0.0.1\nPlease use the SSH_IP environment variable to provide one.");
+                Console.WriteLine("[WARN] No SSH IP provided. Defaulting to 127.0.0.1\nPlease use the SSH_IP environment variable to provide one.");
                 IP = "127.0.0.1";
             }
 
             if (username == null)
             {
-                Console.WriteLine("No SSH username provided. Defaulting to root\nPlease use the SSH_USERNAME environment variable to provide one.");
+                Console.WriteLine("[WARN] No SSH username provided. Defaulting to root\nPlease use the SSH_USERNAME environment variable to provide one.");
                 username = "root";
             }
 
             if (wgCommand == null)
             {
-                Console.WriteLine("No SSH command provided. Defaulting to \"wg show all dump\"\nYou may use the SSH_WG_COMMAND environment variable to configure one if you run WireGuard in a Docker container.");
+                Console.WriteLine("[WARN] No SSH command provided. Defaulting to \"wg show all dump\"\nYou may use the SSH_WG_COMMAND environment variable to configure one if you run WireGuard in a Docker container.");
                 wgCommand = "wg show all dump";
             }
 
@@ -50,28 +50,33 @@ namespace wg_show_dump_API
                 }
                 catch
                 {
-                    Console.WriteLine("No minimum refresh time provided. Defaulting to 10 seconds.\nYou may use use the SSH_MIN_REFRESH environment variable to configure this.");
+                    Console.WriteLine("[WARN] No minimum refresh time provided. Defaulting to 10 seconds.\nYou may use use the SSH_MIN_REFRESH environment variable to configure this.");
                     MinRefreshTime = 10;
                 }
 
-            Console.WriteLine("wg-show-dump-API will use these settings:\nIP: {0}\nSSH Username: {1}\nMinimum Refresh Time: {2} seconds", IP, username, MinRefreshTime.ToString());
+            Console.WriteLine("[INFO] wg-show-dump-API will use these setting:");
+            Console.WriteLine("[INFO] IP:                       " + IP);
+            Console.WriteLine("[INFO] Username:                 " + username);
+            Console.WriteLine("[INFO] Authentication Method:    " + ((password == null) ? "Keyfile" : "Password"));
+            Console.WriteLine("[INFO] Command:                  " + wgCommand);
+            Console.WriteLine("[INFO] Minimum Refresh:          " + minRefreshString.ToString() + " seconds");
 
             //Web App init
-            Console.WriteLine("Creating WebApplication...");
+            Console.WriteLine("[INFO] Creating WebApplication...");
             var builder = WebApplication.CreateBuilder();
             var app = builder.Build();
 
             //Answer on /peer
-            Console.WriteLine("Mapping /peer...");
+            Console.WriteLine("[INFO] Mapping /peer...");
             app.MapGet("/peer", (string id) =>
             {
-                Console.WriteLine("Connection received!");
+                Console.WriteLine("[INFO] Connection received!");
 
                 //Hacky, but feeding an ID treats pluses as spaces. So we'll intentionally treat spaces as pluses.
                 id = id.Replace(" ", "+");
 
                 //Grab peer info
-                Console.WriteLine("Gathering peer information...");
+                Console.WriteLine("[INFO] Gathering peer information...");
                 PeerInfo peerInfo = getPeerInfoById(id);
 
                 //Send the info
@@ -89,13 +94,14 @@ namespace wg_show_dump_API
                 };
             });
 
-            Console.WriteLine("Mapping /peers");
+            Console.WriteLine("[INFO] Mapping /peers");
             app.MapGet("/peers", () =>
             {
                 //Grab peer info
-                Console.WriteLine("Gathering peer information...");
+                Console.WriteLine("[INFO] Gathering peer information...");
                 updatePeerInfos();
 
+                //Pack peerInfos into an object array to return to client
                 object[] peerInfoObjects = new object[peerInfos.Count];
 
                 for(int i = 0; i < peerInfos.Count; i++)
@@ -115,51 +121,87 @@ namespace wg_show_dump_API
                     };
                 }
 
+                Console.WriteLine("[INFO] Returning info for {0} peer(s).", peerInfos.Count);
+
                 return peerInfoObjects;
             });
 
             //Begin app on port 6543
-            Console.WriteLine("Starting server...");
+            Console.WriteLine("[INFO] Starting server...");
             app.RunAsync("http://0.0.0.0:6543");
 
-            Console.WriteLine("Listening on port 6543!");
+            Console.WriteLine("[INFO] Listening on port 6543!");
+
+            //Build the SSH client
+            validateSshClient();
 
             while (true)
             {
-                /*infinite loop, sue me*/
-                try
+                //Infinite loop
+                //We need to keep the app running since the WebApplication is running async
+
+                //We can keep the SSH session alive
+                validateSshClient();
+
+                //No need to check excessively, 1 sec is good
+                Thread.Sleep(10000);
+            }
+        }
+
+        static void validateSshClient()
+        {
+            try
+            {
+                if (client == null)
                 {
-                    if (client == null)
+                    Console.WriteLine("[INFO] Creating SSH client...");
+                    if (password == null)
                     {
-                        if (password == null)
+                        //If no password provided, look for key file
+                        if (File.Exists("key"))
                         {
-                            //If no password provided, use key file
-                            //This will throw an exception if no key file is provided
-                            //We're already in a "try" statement, so I'm not too
-                            //worried about validating whether the file exists
+                            Console.WriteLine("[INFO] Connecting SSH client using key file...");
                             var keyFile = new PrivateKeyFile("key");
                             client = new SshClient(IP, username, keyFile);
                         }
                         else
-                            //Otherwise, use provided password
-                            client = new SshClient(IP, username, password);
-
-                        //Connect
-                        client.Connect();
+                        {
+                            //If neither, fatal error
+                            Console.WriteLine("[FATAL] Neither a key file nor a password were provided!");
+                            Environment.Exit(1);
+                        }
                     }
                     else
-                        if (!client.IsConnected)
-                            client.Dispose();
-                }
-                catch
-                {
-                    //Dispose of client (manual "using")
-                    if (client != null)
-                        client.Dispose();
-                }
+                    {
+                        //Otherwise, use provided password
+                        Console.WriteLine("[INFO] Connecting SSH client using password...");
+                        client = new SshClient(IP, username, password);
+                    }
 
-                //No need to check excessively, 1 sec is good
-                Thread.Sleep(1000);
+                    //Connect
+                    client.Connect();
+
+                    if (client.IsConnected)
+                        Console.WriteLine("[INFO] SSH client connected successfully!");
+                    else
+                        Console.WriteLine("[ERROR] SSH client failed to connect!");
+                }
+                else
+                    if (!client.IsConnected)
+                    {
+                        client.Dispose();
+                        Console.WriteLine("[ERROR] SSH client not connected!");
+                    }
+            }
+            catch
+            {
+                Console.WriteLine("[ERROR] Something went wrong with the SSH client!");
+
+                //Dispose of client
+                if (client != null)
+                    client.Dispose();
+
+                validateSshClient();
             }
         }
 
@@ -174,7 +216,7 @@ namespace wg_show_dump_API
                 //Otherwise, return and force cached entries to be used
                 if (DateTime.Now.Subtract(lastRefresh).TotalSeconds <= MinRefreshTime)
                 {
-                    Console.WriteLine("Using cached information...");
+                    Console.WriteLine("[INFO] Using cached information...");
                     return;
                 }
 
@@ -184,29 +226,18 @@ namespace wg_show_dump_API
                 //10 seconds. Not 10 seconds PLUS the time it takes to refresh and parse.
                 lastRefresh = DateTime.Now;
 
-                Console.WriteLine("Refreshing information...");
+                Console.WriteLine("[INFO] Refreshing information...");
 
                 //Clear cached peer info
                 peerInfos.Clear();
 
-                //Maybe I should "Clear" after these checks,
-                //but I don't want cached info to get too old in the event of an issue
-                //Doing it this way allows that issue to be observed down stream.
-                if (client == null)
-                {
-                    Console.WriteLine("SSH client not initialized!");
-                    return;
-                }
-
-                if (!client.IsConnected)
-                {
-                    Console.WriteLine("SSH client not connected!");
-                    return;
-                }
-
                 try
                 {
+                    //Ensure the SSH client is alive and well
+                    validateSshClient();
+
                     //Send wg dump command (IE: "wg show all dump" or "docker exec wireguard wg show all dump")
+                    Console.WriteLine("[INFO] Running WireGuard command...");
                     using SshCommand cmd = client.RunCommand(wgCommand);
 
                     //"wg show all dump" returns a tab-delimited sheet
@@ -262,14 +293,14 @@ namespace wg_show_dump_API
                         peerInfos.Add(peerInfo);
                     }
 
-                    Console.WriteLine("Successfully parsed {0} peers!", peerInfos.Count);
+                    Console.WriteLine("[INFO] Parsed {0} peer(s)!", peerInfos.Count);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("Something went wrong while trying to refresh info from WireGuard!");
-                    Console.WriteLine("Please report this bug!");
-                    Console.WriteLine(ex.ToString());
-                    Console.WriteLine(ex.Message);
+                    Console.WriteLine("[ERROR] Something went wrong while trying to refresh info from WireGuard!");
+                    Console.WriteLine("[ERROR] Please report this bug!");
+                    Console.WriteLine("[ERROR] " + ex.ToString());
+                    Console.WriteLine("[ERROR] " + ex.Message);
                 }
             }
         }
@@ -283,7 +314,7 @@ namespace wg_show_dump_API
                 if (peerInfo.publicKey == id)
                     return peerInfo;
 
-            Console.WriteLine("Could not find matching peer!");
+            Console.WriteLine("[ERROR] Could not find matching peer!");
 
             //No peer is found
             return new PeerInfo();
