@@ -22,7 +22,7 @@ jobs:
         run: |
           docker build . \
             --file Dockerfile \
-            --tag ghcr.io/${{ github.repository }}:latest
+            --tag ghcr.io/wg-show-dump-api:latest
 
       - name: Push Docker image
         run: docker push ghcr.io/${{ github.repository }}:latest
