@@ -160,7 +160,7 @@ namespace wg_show_dump_API
             }
         }
 
-        static void validateSshClient()
+        static void validateSshClient(int recursiveDelay = 1)
         {
             lock (sshClientLockObject)
             {
@@ -210,6 +210,14 @@ namespace wg_show_dump_API
                 catch
                 {
                     Console.WriteLine("[ERROR] Something went wrong with the SSH client!");
+                    Console.WriteLine("[ERROR] Trying again in {0} seconds...!", recursiveDelay);
+
+                    Thread.Sleep(recursiveDelay * 1000);
+
+                    recursiveDelay *= 2;
+
+                    if (recursiveDelay > 64)
+                        recursiveDelay = 64;
 
                     //Dispose of client
                     if (client != null)
