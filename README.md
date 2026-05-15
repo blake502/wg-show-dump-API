@@ -113,6 +113,10 @@ services:
       - SSH_WG_COMMAND=docker exec wireguard wg show all dump #WireGuard "dump" command
 ```
 
+# TODO
+- Troubleshoot time syncing issue. Currently, a delta of about 25 seconds appears on the "latestHandshake" field.
+- Restructure SSH reconnection in the event of a connection failure. Currently, a stack overflow is possible if it disconnects for a really _really_ long time.
+
 # Homepage example
 If you wish to use this with [Homepage](https://github.com/gethomepage/homepage), your service entry may look like this:
 ```
